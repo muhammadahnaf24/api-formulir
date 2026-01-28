@@ -1,6 +1,5 @@
 const { sql, poolPromise } = require("../config/db");
 
-// Fungsi khusus untuk mengambil data dari Database
 exports.getPasienDataByReg = async (noReg) => {
   try {
     const pool = await poolPromise;
@@ -27,7 +26,7 @@ exports.getPasienDataByReg = async (noReg) => {
           a.vc_n_wali,
           hub.vc_hubungan,
           a.vc_alamat_w,
-          b.vc_nik
+          b.vc_no_ktp
 
         FROM RMP_inap a 
         LEFT JOIN RMPasien b ON a.vc_no_rm = b.vc_no_rm
@@ -40,10 +39,8 @@ exports.getPasienDataByReg = async (noReg) => {
         WHERE vc_no_reg = @noReg
       `);
 
-    // Kembalikan baris pertama jika ada, atau undefined jika kosong
     return result.recordset[0];
   } catch (error) {
-    // Lempar error agar bisa ditangkap controller
     throw error;
   }
 };
