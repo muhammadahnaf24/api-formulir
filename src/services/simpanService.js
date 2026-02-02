@@ -4,8 +4,10 @@ const path = require("path");
 const crypto = require("crypto");
 
 exports.simpanIdentitasPasien = async (data) => {
+  const pool = await poolPromise;
+  const transaction = await pool.transaction();
+  console.log("data ttd", data.tandaTangan);
   try {
-    const pool = await poolPromise;
     let dbSignaturePath = null;
 
     if (data.tandaTangan) {
@@ -34,28 +36,52 @@ exports.simpanIdentitasPasien = async (data) => {
       }
     }
 
-    const query = `
-      INSERT INTO _RM_IdentitasPasien (
-        vc_no_reg, vc_no_rm, vc_nik, 
-        vc_nama_lengkap, vc_tempat_lahir, vc_tanggal_lahir, 
-        vc_umur_tahun, vc_umur_bulan, vc_jenis_kelamin, vc_status_perkawinan, 
-        vc_agama, vc_pendidikan, vc_pekerjaan, vc_no_hp, 
-        vc_alamat, vc_desa, vc_kecamatan, vc_kabupaten, vc_provinsi, 
-        vc_nama_w, vc_hubungan_w, vc_nohp_w, vc_nohp2_w, vc_alamat_w, 
-        created_at, vc_tandatangan
+    await transaction.begin();
+
+    const kodeJenisRM = "RI001";
+    const idRekamMedis = crypto.randomUUID();
+
+    const reqUpdate = new sql.Request(transaction);
+    reqUpdate.input("noRm", sql.VarChar(20), data.noRm);
+    reqUpdate.input("kdJenis", sql.VarChar(50), kodeJenisRM);
+
+    const queryUpdate = `
+        UPDATE _RMEI_RekamMedisH
+        SET 
+            bt_aktif = 0
+
+        WHERE 
+            vc_NoRM = @noRm                   
+            AND c_KdJnsRekamMedis = @kdJenis      
+            AND bt_aktif = 1;             
+    `;
+
+    await reqUpdate.query(queryUpdate);
+
+    // ==============================================================================================================================
+    const reqHeader = new sql.Request(transaction);
+
+    reqHeader.input("idRekamMedis", sql.VarChar(50), idRekamMedis);
+    reqHeader.input("noReg", sql.VarChar(50), data.noReg);
+    reqHeader.input("noRm", sql.VarChar(50), data.noRm);
+    reqHeader.input("kdJnsRekamMedis", sql.VarChar(50), kodeJenisRM);
+
+    const queryHeader = `
+      INSERT INTO _RMEI_RekamMedisH (
+        vc_idRekamMedis, vc_NoReg, vc_NoRM, c_KdJnsRekamMedis, dt_tglTrans, dt_CreatedDate, bt_aktif
       )
       VALUES (
-        @noReg, @noRm, @nik, 
-        @namaLengkap, @tempatLahir, @tanggalLahir, 
-        @umurTahun, @umurBulan, @jenisKelamin, @statusPerkawinan, 
-        @agama, @pendidikan, @pekerjaan, @noHp, 
-        @alamat, @desa, @kecamatan, @kabupaten, @provinsi, 
-        @namaW, @hubunganW, @nohpW, @nohp2W, @alamatW, 
-        GETDATE(), @tandaTangan
+        @idRekamMedis, @noReg, @noRm, @kdJnsRekamMedis, GETDATE(), GETDATE(), 1
       );
     `;
 
-    const request = pool.request();
+    await reqHeader.query(queryHeader);
+
+    // ==============================================================================================================================
+
+    const request = new sql.Request(transaction);
+
+    request.input("idRekamMedis", sql.VarChar(36), idRekamMedis);
     request.input("noReg", sql.VarChar(20), data.noReg);
     request.input("noRm", sql.VarChar(20), data.noRm || null);
     request.input("nik", sql.VarChar(16), data.noKtp || null);
@@ -83,10 +109,36 @@ exports.simpanIdentitasPasien = async (data) => {
     request.input("alamatW", sql.VarChar(sql.MAX), data.daruratAlamat || null);
     request.input("tandaTangan", sql.VarChar(sql.MAX), dbSignaturePath || null);
 
+    const query = `
+      INSERT INTO _RM_IdentitasPasien (
+
+        vc_idRekamMedis, vc_no_reg, vc_no_rm, vc_nik, 
+        vc_nama_lengkap, vc_tempat_lahir, vc_tanggal_lahir,   
+        vc_umur_tahun, vc_umur_bulan, vc_jenis_kelamin, vc_status_perkawinan, 
+        vc_agama, vc_pendidikan, vc_pekerjaan, vc_no_hp, 
+        vc_alamat, vc_desa, vc_kecamatan, vc_kabupaten, vc_provinsi, 
+        vc_nama_w, vc_hubungan_w, vc_nohp_w, vc_nohp2_w, vc_alamat_w, 
+        created_at, tanda_tangan
+      )
+      VALUES (
+        @idRekamMedis, @noReg, @noRm, @nik, 
+        @namaLengkap, @tempatLahir, @tanggalLahir, 
+        @umurTahun, @umurBulan, @jenisKelamin, @statusPerkawinan, 
+        @agama, @pendidikan, @pekerjaan, @noHp, 
+        @alamat, @desa, @kecamatan, @kabupaten, @provinsi, 
+        @namaW, @hubunganW, @nohpW, @nohp2W, @alamatW, 
+        GETDATE(), @tandaTangan
+      );
+    `;
+
     await request.query(query);
+
+    await transaction.commit();
 
     return { success: true, message: "Data baru berhasil ditambahkan." };
   } catch (error) {
+    if (transaction) await transaction.rollback();
+
     console.error("Error Simpan:", error);
     if (error instanceof Error) {
       return { success: false, message: error.message };
