@@ -2,6 +2,7 @@ const { sql, poolPromise } = require("../config/db");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+require("dotenv").config();
 
 exports.simpanIdentitasPasien = async (data) => {
   const pool = await poolPromise;
@@ -11,10 +12,18 @@ exports.simpanIdentitasPasien = async (data) => {
     let dbSignaturePath = null;
 
     if (data.tandaTangan) {
-      const uploadDir = path.join(__dirname, "../../public/uploads/signatures");
+      const tempDir = path.join(__dirname, "../../public/temp_signatures");
 
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      const networkDir = process.env.NETWORK_PATH;
+
+      if (!fs.existsSync(networkDir)) {
+        throw new Error(
+          "❌ Koneksi ke Network Storage (10.10.0.60) terputus/tidak dapat diakses.",
+        );
       }
 
       const matches = data.tandaTangan.match(
@@ -23,12 +32,26 @@ exports.simpanIdentitasPasien = async (data) => {
 
       if (matches && matches.length === 3) {
         const buffer = Buffer.from(matches[2], "base64");
-        const filename = crypto.randomUUID() + ".png";
-        const signaturepath = path.join(uploadDir, filename);
+        const filename = data.noReg + ".png";
 
-        fs.writeFileSync(signaturepath, buffer);
+        const tempFilePath = path.join(tempDir, filename);
+        const networkFilePath = path.join(networkDir, filename);
 
-        dbSignaturePath = `/uploads/signatures/${filename}`;
+        fs.writeFileSync(tempFilePath, buffer);
+        console.log("✅ File ditulis di temp lokal:", tempFilePath);
+
+        try {
+          fs.copyFileSync(tempFilePath, networkFilePath);
+          console.log("✅ File berhasil dicopy ke network:", networkFilePath);
+        } catch (err) {
+          if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+          throw new Error(`Gagal menyalin file ke 10.10.0.60: ${err.message}`);
+        }
+
+        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        console.log("✅ File dihapus dari temp lokal:", tempFilePath);
+
+        dbSignaturePath = path.join(networkDir, filename);
       } else {
         console.warn(
           "⚠️ Peringatan: Format tanda tangan tidak sesuai regex atau rusak.",
